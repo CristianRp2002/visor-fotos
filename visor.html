@@ -29,8 +29,8 @@ const tk = sep => token ? `${sep}token=${encodeURIComponent(token)}` : '';
   try {
     if (!oid) throw new Error('Falta el parámetro oid en el link.');
     const [a, f] = await Promise.all([
-      fetch(`${SERVICIO}/${oid}/attachments?f=json${tk('&')}`, { credentials: 'include' }).then(r => r.json()),
-      fetch(`${SERVICIO}/${oid}?f=json${tk('&')}`, { credentials: 'include' }).then(r => r.json())
+      fetch(`${SERVICIO}/${oid}/attachments?f=json${tk('&')}`).then(r => r.json()),
+      fetch(`${SERVICIO}/${oid}?f=json${tk('&')}`).then(r => r.json())
     ]);
     if (a.error) throw new Error(a.error.message || 'Error al leer adjuntos (¿requiere sesión?)');
     const fotos = (a.attachmentInfos || []).filter(x => (x.contentType || '').startsWith('image'));
