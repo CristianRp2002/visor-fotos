@@ -20,7 +20,7 @@ figcaption{padding:6px 10px;font-size:13px;color:#555}
 <header><h1 id="t">Cargando…</h1><p id="s"></p></header>
 <main><div id="msg"></div><div id="datos"></div><div class="grid" id="g"></div></main>
 <script>
-const SERVICIO = 'https://PEGA-AQUI-LA-URL-DE-TU-CAPA/FeatureServer/0';
+const SERVICIO = 'https://gis.else.com.pe/arcgis_server/rest/services/Hosted/survey123_ad07e6b19349462d83d9a8bb400d4f48_results/FeatureServer/0';
 const p = new URLSearchParams(location.search);
 const oid = p.get('oid'), token = p.get('token');
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
