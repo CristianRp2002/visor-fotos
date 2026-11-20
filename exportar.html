@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Exportar registros a Excel</title>
+<style>
+body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#f3f5f8;color:#222}
+header{background:#1f4e78;color:#fff;padding:14px 22px}
+header h1{margin:0;font-size:20px}
+main{max-width:520px;margin:24px auto;padding:0 16px}
+.card{background:#fff;border:1px solid #d5dae1;border-radius:8px;padding:18px}
+label{display:block;font-size:14px;font-weight:600;margin:12px 0 4px}
+input{width:100%;box-sizing:border-box;padding:8px;font-size:15px;border:1px solid #bbb;border-radius:4px}
+button{margin-top:18px;width:100%;padding:11px;font-size:16px;background:#1f4e78;color:#fff;border:0;border-radius:6px;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+#log{margin-top:14px;font-size:13px;color:#444;white-space:pre-wrap}
+.err{color:#a00}
+</style></head><body>
+<header><h1>Exportar registros a Excel</h1></header>
+<main><div class="card">
+<label for="desde">Desde</label><input type="date" id="desde">
+<label for="hasta">Hasta</label><input type="date" id="hasta">
+<label for="fotosmax">Columnas "Foto 1..N" (0 = solo "Ver fotos")</label><input type="number" id="fotosmax" min="0" max="20" value="4">
+<label for="token">Token (solo si la capa lo exige)</label><input type="text" id="token" placeholder="opcional">
+<button id="go">Generar Excel</button>
+<div id="log"></div>
+</div></main>
+<script>
+// ===== CONFIGURACIÓN =====
+const SERVICIO = 'https://gis.else.com.pe/arcgis_server/rest/services/Hosted/survey123_ad07e6b19349462d83d9a8bb400d4f48_results/FeatureServer/0';
+const VISOR_URL = new URL('visor.html', location.href).href;   // visor.html debe estar en la misma carpeta del repositorio
+const COLUMNAS_BASE = ['x', 'y', 'spatialReference', 'objectid', 'globalid', 'date', 'fechador', 'states',
+  'registro', 'actividad', 'serie', 'energia', 'notas', 'obs', 'idequipo', 'selloagua', 'coodx', 'coody',
+  'error', 'estado', 'alimmt', 'sumin', 'created_user', 'created_date', 'last_edited_user',
+  'last_edited_date', 'hpolar', 'N_FOTOS', 'VER_FOTOS'].map(c => [c, c === 'N_FOTOS' ? 'N° Fotos' : c === 'VER_FOTOS' ? 'Fotos' : c]);
+// =========================
+
+const $ = id => document.getElementById(id);
+const hoy = new Date(), p2 = n => String(n).padStart(2, '0');
+$('desde').value = $('hasta').value = `${hoy.getFullYear()}-${p2(hoy.getMonth() + 1)}-${p2(hoy.getDate())}`;
+const urlToken = new URLSearchParams(location.search).get('token');
+if (urlToken) $('token').value = urlToken;
+const log = (t, err) => { $('log').textContent = t; $('log').className = err ? 'err' : ''; };
+
+const xlsx = (titulos, datos, anchos) => {
+  const enc = new TextEncoder();
+  const x = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+  const col = n => { let s = ''; n++; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - 1 - m) / 26; } return s; };
+  const celda = (v, r, c, st) => {
+    const ref = col(c) + r;
+    if (v && typeof v === 'object') return `<c r="${ref}" s="3" t="str"><f>${x(v.f)}</f><v>${x(v.v)}</v></c>`;
+    if (v == null || v === '') return `<c r="${ref}" s="${st}"/>`;
+    if (typeof v === 'number' && isFinite(v)) return `<c r="${ref}" s="${st}"><v>${v}</v></c>`;
+    return `<c r="${ref}" s="${st}" t="inlineStr"><is><t xml:space="preserve">${x(v)}</t></is></c>`;
+  };
+  const ult = col(titulos.length - 1), n = datos.length + 1;
+  const filasXml = [`<row r="1">${titulos.map((t, c) => celda(t, 1, c, 1)).join('')}</row>`,
+    ...datos.map((f, i) => `<row r="${i + 2}">${f.map((v, c) => celda(v, i + 2, c, 2)).join('')}</row>`)].join('');
+  const X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const NS = 'http://schemas.openxmlformats.org';
+  const archivos = {
+    '[Content_Types].xml': `${X}<Types xmlns="${NS}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
+    '_rels/.rels': `${X}<Relationships xmlns="${NS}/package/2006/relationships"><Relationship Id="rId1" Type="${NS}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    'xl/workbook.xml': `${X}<workbook xmlns="${NS}/spreadsheetml/2006/main" xmlns:r="${NS}/officeDocument/2006/relationships"><sheets><sheet name="Datos" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">Datos!$A$1:$${ult}$${n}</definedName></definedNames></workbook>`,
+    'xl/_rels/workbook.xml.rels': `${X}<Relationships xmlns="${NS}/package/2006/relationships"><Relationship Id="rId1" Type="${NS}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${NS}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    'xl/styles.xml': `${X}<styleSheet xmlns="${NS}/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><u/><sz val="11"/><color rgb="FF0563C1"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom></border></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="4"><xf/><xf fontId="1" fillId="2" borderId="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf borderId="1" applyBorder="1"/><xf fontId="2" borderId="1" applyFont="1" applyBorder="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+    'xl/worksheets/sheet1.xml': `${X}<worksheet xmlns="${NS}/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${anchos.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${filasXml}</sheetData><autoFilter ref="A1:${ult}${n}"/></worksheet>`
+  };
+  const crcT = Array.from({ length: 256 }, (_, k) => { let c = k; for (let j = 0; j < 8; j++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = b => { let c = ~0; for (const y of b) c = crcT[(c ^ y) & 255] ^ (c >>> 8); return ~c >>> 0; };
+  const partes = [], central = []; let off = 0;
+  for (const [nombre, txt] of Object.entries(archivos)) {
+    const nm = enc.encode(nombre), d = enc.encode(txt), c = crc(d);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint32(14, c, true); h.setUint32(18, d.length, true); h.setUint32(22, d.length, true); h.setUint16(26, nm.length, true);
+    partes.push(h, nm, d);
+    const e = new DataView(new ArrayBuffer(46));
+    e.setUint32(0, 0x02014b50, true); e.setUint16(4, 20, true); e.setUint16(6, 20, true); e.setUint16(8, 0x0800, true);
+    e.setUint32(16, c, true); e.setUint32(20, d.length, true); e.setUint32(24, d.length, true); e.setUint16(28, nm.length, true); e.setUint32(42, off, true);
+    central.push(e, nm);
+    off += 30 + nm.length + d.length;
+  }
+  const tam = central.reduce((s, p) => s + p.byteLength, 0), cnt = Object.keys(archivos).length;
+  const fin = new DataView(new ArrayBuffer(22));
+  fin.setUint32(0, 0x06054b50, true); fin.setUint16(8, cnt, true); fin.setUint16(10, cnt, true); fin.setUint32(12, tam, true); fin.setUint32(16, off, true);
+  return new Blob([...partes, ...central, fin], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+};
+
+async function exportar() {
+  const DESDE = $('desde').value, HASTA = $('hasta').value;
+  const MAX_FOTOS_INDIVIDUALES = Math.max(0, parseInt($('fotosmax').value) || 0);
+  const token = $('token').value.trim();
+  if (!DESDE || !HASTA) throw new Error('Elige las dos fechas.');
+  if (DESDE > HASTA) throw new Error('"Desde" no puede ser posterior a "Hasta".');
+
+  const get = async (path, params) => {
+    const p = new URLSearchParams({ ...params, f: 'json' });
+    if (token) p.set('token', token);
+    const r = await fetch(`${SERVICIO}/${path}`, { method: 'POST', body: p });
+    const j = await r.json();
+    if (j.error) throw new Error(`${j.error.message || 'Error del servicio'} (código ${j.error.code})`);
+    return j;
+  };
+
+  log('Leyendo la capa…');
+  const info = await get('', {});
+  const oidField = info.objectIdField || 'objectid';
+  const dateFields = new Set((info.fields || []).filter(f => f.type === 'esriFieldTypeDate').map(f => f.name));
+
+  const todos = ((await get('query', { where: '1=1', returnIdsOnly: true })).objectIds || []).sort((a, b) => a - b);
+  const ids = [];
+  for (let i = 0; i < todos.length; i += 1000) {
+    const r = await get('query', { objectIds: todos.slice(i, i + 1000).join(','), outFields: `${oidField},fechador`, returnGeometry: false });
+    for (const ft of r.features) {
+      const m = String(ft.attributes.fechador || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (!m) continue;
+      const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      if (iso >= DESDE && iso <= HASTA) ids.push(ft.attributes[oidField]);
+    }
+    log(`Revisando fechas ${Math.min(i + 1000, todos.length)} / ${todos.length}`);
+  }
+  ids.sort((a, b) => a - b);
+  if (!ids.length) throw new Error('No hay registros en ese rango de fechas.');
+
+  const fmtFecha = ms => { const d = new Date(ms); return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+  const conToken = (url, sep) => {
+    if (!token) return url;
+    const t = `${url}${sep}token=${encodeURIComponent(token)}`;
+    return t.length <= 255 ? t : url;
+  };
+  const urlFoto = (oid, idAdj) => conToken(`${SERVICIO}/${oid}/attachments/${idAdj}`, '?');
+  const urlVisor = oid => conToken(`${VISOR_URL}?oid=${oid}`, '&');
+
+  const LOTE = 50, filas = new Map(), cont = new Map(), fotos = new Map();
+  for (let i = 0; i < ids.length; i += LOTE) {
+    const lote = ids.slice(i, i + LOTE).join(',');
+    const f = await get('query', { objectIds: lote, outFields: '*', returnGeometry: true });
+    for (const ft of f.features) {
+      const a = ft.attributes;
+      if (ft.geometry) { a.x = ft.geometry.x; a.y = ft.geometry.y; }
+      a.spatialReference = (f.spatialReference || {}).wkid || (f.spatialReference || {}).latestWkid;
+      for (const d of dateFields) if (a[d] != null) a[d] = fmtFecha(a[d]);
+      filas.set(a[oidField], a);
+    }
+    const at = await get('queryAttachments', { objectIds: lote });
+    for (const g of at.attachmentGroups || []) {
+      const c = cont.get(g.parentObjectId) || { N_ADJUNTOS: 0, N_FOTOS: 0, N_ARCHIVOS: 0 };
+      const lista = fotos.get(g.parentObjectId) || [];
+      for (const x of g.attachmentInfos) {
+        c.N_ADJUNTOS++;
+        if ((x.contentType || x.content_type || '').startsWith('image')) { c.N_FOTOS++; lista.push(urlFoto(g.parentObjectId, x.id)); }
+        else c.N_ARCHIVOS++;
+      }
+      cont.set(g.parentObjectId, c);
+      fotos.set(g.parentObjectId, lista);
+    }
+    log(`Procesados ${Math.min(i + LOTE, ids.length)} / ${ids.length}`);
+  }
+
+  const maxFotos = Math.min(MAX_FOTOS_INDIVIDUALES, Math.max(0, ...[...fotos.values()].map(l => l.length)));
+  const COLUMNAS = [...COLUMNAS_BASE];
+  for (let k = 1; k <= maxFotos; k++) COLUMNAS.push([`FOTO_${k}`, `Foto ${k}`]);
+
+  const cero = { N_ADJUNTOS: 0, N_FOTOS: 0, N_ARCHIVOS: 0 };
+  const q = s => String(s).replace(/"/g, '""');
+  const enlace = (url, texto) => ({ f: `HYPERLINK("${q(url)}","${q(texto)}")`, v: texto });
+  const rows = [...filas.values()].map(a => {
+    const oid = a[oidField], lista = fotos.get(oid) || [];
+    const r = { ...a, ...(cont.get(oid) || cero) };
+    if (lista.length) {
+      r.VER_FOTOS = enlace(urlVisor(oid), `Ver ${lista.length} foto${lista.length > 1 ? 's' : ''}`);
+      lista.slice(0, maxFotos).forEach((u, i) => { r[`FOTO_${i + 1}`] = enlace(u, `Foto ${i + 1}`); });
+    }
+    return r;
+  });
+
+  const titulos = COLUMNAS.map(c => c[1]);
+  const datos = rows.map(r => COLUMNAS.map(([campo]) => r[campo]));
+  const txt = v => (v && typeof v === 'object') ? v.v : v;
+  const anchos = COLUMNAS.map(([campo, tit], k) =>
+    Math.min(60, Math.max(8, String(tit).length + 2, ...datos.map(f => String(txt(f[k]) ?? '').split('\n')[0].length + 2))));
+
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(xlsx(titulos, datos, anchos));
+  link.download = `survey_${DESDE}_a_${HASTA}.xlsx`;
+  link.click();
+  log(`Listo. Registros: ${rows.length} | Fotos: ${rows.reduce((s, r) => s + r.N_FOTOS, 0)}`);
+}
+
+$('go').onclick = async () => {
+  $('go').disabled = true;
+  try { await exportar(); }
+  catch (e) { log('Error: ' + e.message, true); }
+  $('go').disabled = false;
+};
+</script></body></html>
